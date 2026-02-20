@@ -21,6 +21,7 @@ import { FoodiesRoute } from './pages/FoodiesRoute';
 import { MessageProvider } from './contexts/MessageContext';
 import { RideProvider } from './contexts/RideContext';
 import { OrderSessionProvider } from './contexts/OrderSessionContext';
+import { FoodOrderSessionProvider } from './contexts/FoodOrderSession';
 import { CurrentRideBar } from './components/CurrentRideBar';
 import { WaitingForDriverBar } from './components/WaitingForDriverBar';
 import { RatingModal } from './components/RatingModal';
@@ -239,8 +240,9 @@ function AppContent() {
 
   return (
     <OrderSessionProvider>
-      <MessageProvider userId={profile?.id || null} rideId={appState.currentRideId}>
-        <RideProvider rideId={appState.currentRideId}>
+      <FoodOrderSessionProvider>
+        <MessageProvider userId={profile?.id || null} rideId={appState.currentRideId}>
+          <RideProvider rideId={appState.currentRideId}>
           <div className="app">
           <AnimatePresence>
             {isRideActive() && driverInfo && location.pathname !== '/driver-coming' && (
@@ -403,7 +405,8 @@ function AppContent() {
           )}
         </div>
         </RideProvider>
-      </MessageProvider>
+        </MessageProvider>
+      </FoodOrderSessionProvider>
     </OrderSessionProvider>
   );
 }

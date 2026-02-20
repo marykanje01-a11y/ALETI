@@ -1,442 +1,382 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, MapPin, Plus, X, Search } from 'lucide-react';
-import { useOrderSession } from '../contexts/OrderSessionContext';
+import { ArrowLeft, Plus, X, Clock, ChevronRight } from 'lucide-react';
+import { useFoodOrderSession, FoodItem } from '../contexts/FoodOrderSession';
 import { FoodSelectionModal } from '../components/FoodSelectionModal';
-import { searchAddresses, getCurrentLocationAddress } from '../services/mockAddressService';
-import { Address } from '../types/orderSession';
+import { useGeolocation } from '../hooks/useGeolocation';
+import { mockDeliveryAddresses, getDeliveryAddressSuggestions } from '../data/mockDeliveryAddresses';
 
-export const FoodiesRoute: React.FC = () => {
+export function FoodiesRoute() {
   const navigate = useNavigate();
+  const { address: currentLocation, loading: locationLoading } = useGeolocation();
   const {
-    orderSession,
-    updatePrimaryLocation,
+    cartItems,
+    currentLocationFoodIds,
+    stops,
     addStop,
     removeStop,
-    updateStopAddress,
-    getUnassignedItems,
-    getItemsForStop,
+    updateStop,
     canAddStop,
-    cleanStops,
-    unassignItemFromStop,
-    assignItemToStop
-  } = useOrderSession();
+    getCurrentLocationFoods,
+    removeStopsWithoutFoodOrAddress,
+    deliveryLocation,
+    setDeliveryLocation,
+  } = useFoodOrderSession();
+  const currentLocationInputRef = useRef<HTMLInputElement>(null);
+  const stopInputRefs = useRef<{ [key: string]: HTMLInputElement }>({});
 
   const [showCurrentLocationModal, setShowCurrentLocationModal] = useState(false);
-  const [showStopFoodModal, setShowStopFoodModal] = useState(false);
-  const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
-  const [showAddressSearch, setShowAddressSearch] = useState(false);
-  const [addressSearchQuery, setAddressSearchQuery] = useState('');
-  const [addressSuggestions, setAddressSuggestions] = useState<Address[]>([]);
-  const [currentStopMode, setCurrentStopMode] = useState<'current' | 'stop'>('current');
+  const [showStopModal, setShowStopModal] = useState<string | null>(null);
+  const [currentLocationQuery, setCurrentLocationQuery] = useState('');
+  const [stopAddressQuery, setStopAddressQuery] = useState<{ [key: string]: string }>({});
+  const [activeLocationInput, setActiveLocationInput] = useState('current-location');
+  const [showCurrentLocationSuggestions, setShowCurrentLocationSuggestions] = useState(false);
+  const [showStopSuggestions, setShowStopSuggestions] = useState<{ [key: string]: boolean }>({});
+  const [showRecentAddresses, setShowRecentAddresses] = useState(true);
+  const [hasAutoFilled, setHasAutoFilled] = useState(false);
 
-  const unassignedItems = getUnassignedItems();
-  const allCartItems = orderSession.cartItems;
-
-  const handleSearchAddresses = useCallback(async (query: string) => {
-    setAddressSearchQuery(query);
-    const results = await searchAddresses(query);
-    setAddressSuggestions(results);
-  }, []);
-
-  const handleSelectAddress = (address: Address) => {
-    if (currentStopMode === 'current') {
-      updatePrimaryLocation(address);
-    } else if (selectedStopId) {
-      updateStopAddress(selectedStopId, address);
+  useEffect(() => {
+    if (currentLocation && !deliveryLocation && !hasAutoFilled) {
+      setDeliveryLocation(currentLocation);
+      setCurrentLocationQuery(currentLocation);
+      setHasAutoFilled(true);
+    } else if (deliveryLocation && !currentLocationQuery) {
+      setCurrentLocationQuery(deliveryLocation);
     }
-    setShowAddressSearch(false);
-    setAddressSearchQuery('');
-    setAddressSuggestions([]);
+  }, [currentLocation, deliveryLocation, setDeliveryLocation, hasAutoFilled, currentLocationQuery]);
+
+  const handleCurrentLocationChange = (value: string) => {
+    setCurrentLocationQuery(value);
+    setDeliveryLocation(value);
+    setShowCurrentLocationSuggestions(false);
+    setShowRecentAddresses(value.length === 0 && activeLocationInput === 'current-location');
+  };
+
+  const handleCurrentLocationSelect = (address: string) => {
+    setDeliveryLocation(address);
+    setCurrentLocationQuery(address);
+    setShowCurrentLocationSuggestions(false);
+    setShowRecentAddresses(true);
+    setActiveLocationInput('current-location');
+
+    if (stops.length > 0 && !stops[0].address) {
+      setTimeout(() => {
+        setActiveLocationInput(stops[0].id);
+        stopInputRefs.current[stops[0].id]?.focus();
+      }, 100);
+    }
+  };
+
+  const handleClearCurrentLocation = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCurrentLocationQuery('');
+    setDeliveryLocation('');
+    setShowCurrentLocationSuggestions(false);
+    setShowRecentAddresses(true);
+    setTimeout(() => currentLocationInputRef.current?.focus(), 0);
+  };
+
+  const handleStopAddressChange = (stopId: string, value: string) => {
+    updateStop(stopId, { address: value });
+    setStopAddressQuery(prev => ({ ...prev, [stopId]: value }));
+    setShowStopSuggestions(prev => ({ ...prev, [stopId]: false }));
+    setShowRecentAddresses(value.length === 0);
+  };
+
+  const handleStopAddressSelect = (stopId: string, address: string, description: string) => {
+    updateStop(stopId, { address, description });
+    setStopAddressQuery(prev => ({ ...prev, [stopId]: '' }));
+    setShowStopSuggestions(prev => ({ ...prev, [stopId]: false }));
+    setShowRecentAddresses(true);
+
+    const currentIndex = stops.findIndex(s => s.id === stopId);
+    if (currentIndex < stops.length - 1) {
+      const nextStop = stops[currentIndex + 1];
+      if (!nextStop.address) {
+        setTimeout(() => {
+          setActiveLocationInput(nextStop.id);
+          stopInputRefs.current[nextStop.id]?.focus();
+        }, 100);
+      }
+    }
+  };
+
+  const handleClearStop = (e: React.MouseEvent, stopId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    updateStop(stopId, { address: '' });
+    setStopAddressQuery(prev => ({ ...prev, [stopId]: '' }));
+    setShowRecentAddresses(true);
+    setTimeout(() => stopInputRefs.current[stopId]?.focus(), 0);
   };
 
   const handleAddStop = () => {
-    if (canAddStop()) {
-      addStop();
-    }
+    if (!canAddStop()) return;
+
+    const newStop = {
+      id: `stop-${Date.now()}`,
+      address: '',
+      foodIds: []
+    };
+    addStop(newStop);
+    setTimeout(() => {
+      setActiveLocationInput(newStop.id);
+      stopInputRefs.current[newStop.id]?.focus();
+      setShowRecentAddresses(true);
+    }, 100);
   };
 
-  const handleViewFoodCurrentLocation = () => {
-    setCurrentStopMode('current');
-    setShowCurrentLocationModal(true);
-  };
-
-  const handleViewFoodStop = (stopId: string) => {
-    setSelectedStopId(stopId);
-    setCurrentStopMode('stop');
-    setShowStopFoodModal(true);
-  };
-
-  const handleConfirmCurrentLocationFood = (itemIds: string[]) => {
-    const allSelectedIds = new Set(itemIds);
-    const currentlyAssigned = allCartItems
-      .filter(item => item.assignedTo === 'CURRENT')
-      .map(item => item.id);
-
-    currentlyAssigned.forEach(id => {
-      if (!allSelectedIds.has(id)) {
-        unassignItemFromStop(id, 'CURRENT');
-      }
-    });
-
-    itemIds.forEach(id => {
-      const item = allCartItems.find(item => item.id === id);
-      if (item && item.assignedTo !== 'CURRENT') {
-        assignItemToStop(id, 'CURRENT');
-      }
-    });
-
-    setShowCurrentLocationModal(false);
-  };
-
-  const handleConfirmStopFood = (itemIds: string[]) => {
-    if (!selectedStopId) return;
-
-    const stop = orderSession.foodiesRoute.stops.find(s => s.id === selectedStopId);
-    if (!stop) return;
-
-    const currentlyAssigned = allCartItems
-      .filter(item => item.assignedTo === selectedStopId)
-      .map(item => item.id);
-
-    currentlyAssigned.forEach(id => {
-      if (!itemIds.includes(id)) {
-        unassignItemFromStop(id, selectedStopId);
-      }
-    });
-
-    itemIds.forEach(id => {
-      const item = allCartItems.find(item => item.id === id);
-      if (item && item.assignedTo !== selectedStopId && item.assignedTo === 'CURRENT') {
-        assignItemToStop(id, selectedStopId);
-      }
-    });
-
-    setShowStopFoodModal(false);
+  const handleRemoveStop = (stopId: string) => {
+    removeStop(stopId);
+    setActiveLocationInput('current-location');
+    setShowRecentAddresses(true);
   };
 
   const handleGoToDelivery = () => {
-    cleanStops();
-    navigate('/select-delivery');
+    removeStopsWithoutFoodOrAddress();
+    navigate('/food-delivery');
   };
 
-  const handleRemoveItemFromCurrentLocation = (itemId: string) => {
-    const item = allCartItems.find(i => i.id === itemId);
-    if (item && item.assignedTo === 'CURRENT') {
-      unassignItemFromStop(itemId, 'CURRENT');
-    }
-  };
-
-  const currentLocationItems = allCartItems.filter(
-    item => item.assignedTo === 'CURRENT'
-  );
+  const currentLocationFoods = getCurrentLocationFoods();
+  const currentLocationSuggestions = getDeliveryAddressSuggestions(currentLocationQuery);
+  const pickupLocation = cartItems[0]?.storeName || 'Store';
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
-      {/* Header */}
-      <motion.div
-        className="sticky top-0 z-20 bg-white border-b border-gray-200 px-4 py-4"
-        initial={{ y: -100, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-      >
-        <div className="flex items-center space-x-4">
-          <motion.button
-            onClick={() => navigate(-1)}
-            className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
-            whileTap={{ scale: 0.95 }}
-          >
-            <ArrowLeft size={20} className="text-gray-700" />
-          </motion.button>
-          <h1 className="text-2xl font-bold text-gray-900">Foodies Route</h1>
-        </div>
-      </motion.div>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
+      className="flex flex-col h-screen bg-gray-50"
+    >
+      <div className="fixed top-0 left-0 right-0 z-30 bg-white border-b border-gray-100 flex-shrink-0">
+        <div className="p-3">
+          <div className="flex items-center gap-2 mb-3">
+            <motion.button
+              onClick={() => navigate('/order-foodies/' + cartItems[0]?.storeId)}
+              whileTap={{ scale: 0.95 }}
+              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors flex-shrink-0"
+            >
+              <X size={20} className="text-gray-800" />
+            </motion.button>
 
-      {/* Route Container */}
-      <div className="px-4 py-6 pb-32">
-        <div className="space-y-4">
-          {/* Current Location */}
-          <motion.div
-            className="bg-white rounded-2xl border-2 border-green-600 overflow-hidden"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-          >
-            <div className="p-4">
-              <div className="flex items-start space-x-3">
-                <div className="w-8 h-8 rounded-full bg-green-600 flex items-center justify-center flex-shrink-0 mt-1">
-                  <span className="text-white text-sm">📍</span>
-                </div>
+            <div className="flex-1 flex items-center gap-1 min-w-0">
+              <span className="text-sm font-semibold text-gray-900 truncate">{pickupLocation}</span>
+              <span className="text-gray-500 flex-shrink-0">→</span>
+              <span className="text-sm font-semibold text-gray-900 truncate">{deliveryLocation.split(',')[0] || 'Delivery'}</span>
+            </div>
 
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-semibold text-gray-600 mb-1">Pickup</h3>
+            <motion.button
+              onClick={handleAddStop}
+              disabled={!canAddStop()}
+              className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors flex-shrink-0 ${
+                canAddStop()
+                  ? 'bg-green-500 hover:bg-green-600 text-white'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+              whileTap={{ scale: canAddStop() ? 0.95 : 1 }}
+            >
+              <Plus size={16} />
+            </motion.button>
+          </div>
+
+          <div className="relative">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0"></div>
+              <div className={`flex-1 relative flex items-center rounded-lg px-3 py-2 transition-all ${
+                activeLocationInput === 'current-location'
+                  ? 'bg-white border border-green-500 shadow-sm'
+                  : 'bg-gray-100 border border-transparent'
+              }`}>
+                <input
+                  ref={currentLocationInputRef}
+                  type="text"
+                  value={currentLocationQuery}
+                  onChange={(e) => handleCurrentLocationChange(e.target.value)}
+                  onFocus={() => {
+                    setActiveLocationInput('current-location');
+                    setShowRecentAddresses(true);
+                  }}
+                  placeholder="Delivery location"
+                  className="flex-1 bg-transparent text-gray-900 text-xs outline-none"
+                />
+                {currentLocationQuery && (
                   <motion.button
-                    onClick={() => {
-                      setCurrentStopMode('current');
-                      setShowAddressSearch(true);
-                    }}
-                    className="w-full text-left"
+                    onClick={handleClearCurrentLocation}
+                    onMouseDown={(e) => e.preventDefault()}
+                    className="mr-2 w-4 h-4 bg-gray-300 rounded-full flex items-center justify-center hover:bg-gray-400 transition-colors"
+                    whileTap={{ scale: 0.9 }}
                   >
-                    <p className="font-bold text-gray-900 truncate">
-                      {orderSession.foodiesRoute.primaryLocation?.description || 'Current Location'}
-                    </p>
+                    <X size={10} className="text-white" />
                   </motion.button>
-                </div>
-
-                {/* View Your Food Button */}
+                )}
                 <motion.button
-                  onClick={handleViewFoodCurrentLocation}
-                  className="flex items-center space-x-2 bg-gray-100 rounded-xl px-3 py-2 hover:bg-gray-200 transition-colors flex-shrink-0"
+                  onClick={() => setShowCurrentLocationModal(true)}
+                  disabled={currentLocationFoods.length === 0}
+                  className="relative ml-2 flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-full border border-gray-200 hover:bg-gray-100 transition-colors"
                   whileTap={{ scale: 0.95 }}
                 >
-                  <div className="relative">
-                    <span className="text-xl">🍔</span>
-                    {currentLocationItems.length > 0 && (
-                      <motion.div
-                        className="absolute -top-2 -right-2 w-5 h-5 bg-red-600 rounded-full flex items-center justify-center"
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                      >
-                        <span className="text-white text-xs font-bold">
-                          {currentLocationItems.length}
-                        </span>
-                      </motion.div>
-                    )}
-                  </div>
-                  <span className="text-xs font-medium text-gray-700 whitespace-nowrap">
-                    View your food
-                  </span>
+                  <span className="text-sm">🍔</span>
+                  <span className="text-[10px] font-medium text-gray-700">View your foodies</span>
+                  {currentLocationFoods.length > 0 && (
+                    <motion.span
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-bold rounded-full w-4 h-4 flex items-center justify-center"
+                    >
+                      {currentLocationFoods.length}
+                    </motion.span>
+                  )}
                 </motion.button>
               </div>
             </div>
 
-            {/* Current Location Food Items (View Only) */}
-            <AnimatePresence>
-              {currentLocationItems.length > 0 && (
-                <motion.div
-                  className="border-t border-gray-200 bg-gray-50 p-4 space-y-2"
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                >
-                  {currentLocationItems.map((item, index) => (
-                    <motion.div
-                      key={item.id}
-                      className="flex items-center justify-between bg-white rounded-lg p-3"
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                    >
-                      <div className="flex items-center space-x-3 flex-1 min-w-0">
-                        <img
-                          src={item.image}
-                          alt={item.name}
-                          className="w-10 h-10 rounded-lg object-cover"
-                        />
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">
-                            {item.name}
-                          </p>
-                          <p className="text-xs text-gray-600">K{item.price}</p>
-                        </div>
-                      </div>
-                      <motion.button
-                        onClick={() => handleRemoveItemFromCurrentLocation(item.id)}
-                        className="w-6 h-6 rounded-full bg-red-100 flex items-center justify-center hover:bg-red-200 transition-colors flex-shrink-0 ml-2"
-                        whileTap={{ scale: 0.9 }}
-                      >
-                        <X size={14} className="text-red-600" />
-                      </motion.button>
-                    </motion.div>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
+          </div>
 
-          {/* Stops */}
           <AnimatePresence>
-            {orderSession.foodiesRoute.stops.map((stop, stopIndex) => {
-              const stopItems = allCartItems.filter(item => item.assignedTo === stop.id);
-              return (
-                <motion.div
-                  key={stop.id}
-                  className="bg-white rounded-2xl border-2 border-gray-300 overflow-hidden"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 + stopIndex * 0.1 }}
-                  exit={{ opacity: 0, y: -20 }}
-                >
-                  <div className="p-4">
-                    <div className="flex items-start space-x-3">
-                      <div className="w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center flex-shrink-0 mt-1">
-                        <span className="text-white text-sm">📍</span>
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-semibold text-gray-600 mb-1">
-                          Stop {stopIndex + 1}
-                        </h3>
-                        <motion.button
-                          onClick={() => {
-                            setSelectedStopId(stop.id);
-                            setCurrentStopMode('stop');
-                            setShowAddressSearch(true);
-                          }}
-                          className="w-full text-left"
-                        >
-                          <p className="font-bold text-gray-900 truncate">
-                            {stop.address?.description || 'Add stop'}
-                          </p>
-                        </motion.button>
-                      </div>
-
-                      {/* Add Food Button */}
+            {stops.map((stop) => (
+              <motion.div
+                key={stop.id}
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="mt-2 relative"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full flex-shrink-0"></div>
+                  <div className={`flex-1 relative flex items-center rounded-lg px-3 py-2 transition-all ${
+                    activeLocationInput === stop.id
+                      ? 'bg-white border border-green-500 shadow-sm'
+                      : 'bg-gray-100 border border-transparent'
+                  }`}>
+                    <input
+                      ref={(el) => {
+                        if (el) stopInputRefs.current[stop.id] = el;
+                      }}
+                      type="text"
+                      value={stop.address ?? ''}
+                      onChange={(e) => handleStopAddressChange(stop.id, e.target.value)}
+                      onFocus={() => {
+                        setActiveLocationInput(stop.id);
+                        setShowRecentAddresses(true);
+                      }}
+                      placeholder="Stop location"
+                      className="flex-1 bg-transparent text-gray-900 text-xs outline-none"
+                    />
+                    {stop.address && (
                       <motion.button
-                        onClick={() => handleViewFoodStop(stop.id)}
-                        className={`text-xs font-medium px-3 py-2 rounded-xl transition-all flex-shrink-0 ${
-                          stopItems.length > 0
-                            ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                        whileTap={{ scale: 0.95 }}
-                      >
-                        {stopItems.length > 0 ? `Food added${stopItems.length}` : 'Add item'}
-                      </motion.button>
-
-                      {/* Remove Stop */}
-                      <motion.button
-                        onClick={() => removeStop(stop.id)}
-                        className="w-6 h-6 bg-red-100 rounded-full flex items-center justify-center hover:bg-red-200 transition-colors flex-shrink-0"
+                        onClick={(e) => handleClearStop(e, stop.id)}
+                        onMouseDown={(e) => e.preventDefault()}
+                        className="mr-2 w-4 h-4 bg-gray-300 rounded-full flex items-center justify-center hover:bg-gray-400 transition-colors"
                         whileTap={{ scale: 0.9 }}
                       >
-                        <X size={14} className="text-red-600" />
+                        <X size={10} className="text-white" />
                       </motion.button>
-                    </div>
+                    )}
+                    <motion.button
+                      onClick={() => setShowStopModal(stop.id)}
+                      className="ml-2 px-2 py-1 bg-gray-50 rounded-full border border-gray-200 hover:bg-gray-100 transition-colors"
+                      whileTap={{ scale: 0.95 }}
+                    >
+                      <span className="text-[10px] font-medium text-gray-700">
+                        {stop.foodIds.length > 0 ? `+${stop.foodIds.length}` : 'Add food'}
+                      </span>
+                    </motion.button>
                   </div>
-                </motion.div>
-              );
-            })}
+                  <button
+                    onClick={() => handleRemoveStop(stop.id)}
+                    className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors flex-shrink-0"
+                  >
+                    <X size={14} className="text-red-500" />
+                  </button>
+                </div>
+              </motion.div>
+            ))}
           </AnimatePresence>
-
-          {/* Add Stop Button */}
-          {canAddStop() && (
-            <motion.button
-              onClick={handleAddStop}
-              className="w-full border-2 border-green-600 border-dashed rounded-2xl p-4 text-green-600 font-semibold hover:bg-green-50 transition-colors"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              + Add Stop
-            </motion.button>
-          )}
         </div>
       </div>
 
-      {/* Go to Delivery Button */}
-      <motion.div
-        className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4"
-        initial={{ y: 100 }}
-        animate={{ y: 0 }}
-        transition={{ delay: 0.2 }}
-      >
+      <div className="flex-1 overflow-y-auto pt-40 px-3 pb-20">
+        {showRecentAddresses && (
+          <div className="space-y-2">
+            <p className="text-[10px] text-gray-500 px-2">
+              {currentLocationQuery === '' ? 'Suggested locations' : 'Recent addresses'}
+            </p>
+
+            {currentLocationQuery === '' && currentLocation && activeLocationInput === 'current-location' && (
+              <motion.button
+                onClick={() => handleCurrentLocationSelect(currentLocation)}
+                className="w-full flex items-center gap-3 p-3 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors shadow-sm border border-blue-200"
+                whileTap={{ scale: 0.98 }}
+              >
+                <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Clock size={16} className="text-white" />
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="font-medium text-gray-900 text-xs">Current location</p>
+                  <p className="text-[10px] text-gray-600">{currentLocation.split(',')[0]}</p>
+                </div>
+              </motion.button>
+            )}
+
+            {mockDeliveryAddresses.slice(0, 5).map((addr) => (
+              <motion.button
+                key={addr.id}
+                onClick={() => {
+                  if (activeLocationInput === 'current-location') {
+                    handleCurrentLocationSelect(addr.address);
+                  } else {
+                    handleStopAddressSelect(activeLocationInput as string, addr.address, addr.description);
+                  }
+                }}
+                className="w-full flex items-center gap-3 p-3 bg-white rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
+                whileTap={{ scale: 0.98 }}
+              >
+                <Clock size={16} className="text-gray-400 flex-shrink-0" />
+                <div className="flex-1 text-left">
+                  <p className="font-medium text-gray-900 text-xs">{addr.name}</p>
+                  <p className="text-[10px] text-gray-500">{addr.description}</p>
+                </div>
+              </motion.button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="fixed bottom-0 left-0 right-0 p-3 bg-white border-t border-gray-100 z-20">
         <motion.button
           onClick={handleGoToDelivery}
-          className="w-full bg-teal-600 text-white font-bold py-4 rounded-2xl hover:bg-teal-700 transition-colors"
+          disabled={currentLocationFoods.length === 0}
+          className={`w-full py-3 rounded-lg font-semibold text-sm transition-colors flex items-center justify-center gap-2 ${
+            currentLocationFoods.length > 0
+              ? 'bg-green-600 text-white hover:bg-green-700'
+              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+          }`}
           whileTap={{ scale: 0.98 }}
         >
           Go to delivery
+          <ChevronRight size={16} />
         </motion.button>
-      </motion.div>
+      </div>
 
-      {/* Address Search Modal */}
-      <AnimatePresence>
-        {showAddressSearch && (
-          <>
-            <motion.div
-              className="fixed inset-0 bg-black z-40"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 0.5 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowAddressSearch(false)}
-            />
-            <motion.div
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 max-h-[80vh]"
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-            >
-              <div className="p-6 space-y-4 max-h-[80vh] overflow-y-auto pb-24">
-                <div className="relative">
-                  <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-                  <input
-                    type="text"
-                    placeholder="Search addresses..."
-                    value={addressSearchQuery}
-                    onChange={(e) => handleSearchAddresses(e.target.value)}
-                    autoFocus
-                    className="w-full bg-gray-100 rounded-full pl-12 pr-4 py-3 text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500"
-                  />
-                </div>
-
-                {addressSearchQuery === '' && (
-                  <motion.button
-                    onClick={() => {
-                      handleSelectAddress(getCurrentLocationAddress());
-                    }}
-                    className="w-full text-left p-4 rounded-xl hover:bg-gray-50 transition-colors border border-gray-200"
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <p className="font-bold text-gray-900">Use current location</p>
-                  </motion.button>
-                )}
-
-                <div className="space-y-2">
-                  {addressSuggestions.map((address, index) => (
-                    <motion.button
-                      key={address.place_id}
-                      onClick={() => handleSelectAddress(address)}
-                      className="w-full text-left p-4 rounded-xl hover:bg-gray-50 transition-colors border border-gray-200"
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      whileTap={{ scale: 0.98 }}
-                    >
-                      <p className="font-bold text-gray-900">{address.description}</p>
-                    </motion.button>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* Food Selection Modal - Current Location */}
       <FoodSelectionModal
         isOpen={showCurrentLocationModal}
         onClose={() => setShowCurrentLocationModal(false)}
-        onConfirm={handleConfirmCurrentLocationFood}
-        allItems={allCartItems}
-        currentItems={currentLocationItems}
-        isCurrentLocation={true}
         title="Your Food"
+        stopId="current-location"
+        mode="current-location"
       />
 
-      {/* Food Selection Modal - Stop */}
-      <FoodSelectionModal
-        isOpen={showStopFoodModal}
-        onClose={() => setShowStopFoodModal(false)}
-        onConfirm={handleConfirmStopFood}
-        allItems={allCartItems}
-        currentItems={allCartItems.filter(item => item.assignedTo === selectedStopId)}
-        stopId={selectedStopId || ''}
-        title="Select Food for Stop"
-      />
-    </div>
+      {showStopModal && (
+        <FoodSelectionModal
+          isOpen={true}
+          onClose={() => setShowStopModal(null)}
+          title="Select Food for Stop"
+          stopId={showStopModal}
+          mode="stop"
+        />
+      )}
+    </motion.div>
   );
-};
+}

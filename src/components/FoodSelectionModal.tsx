@@ -1,76 +1,54 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ChevronDown } from 'lucide-react';
-import { CartItem } from '../types/orderSession';
+import { X } from 'lucide-react';
+import { useFoodOrderSession } from '../contexts/FoodOrderSession';
 
 interface FoodSelectionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (itemIds: string[]) => void;
-  allItems: CartItem[];
-  currentItems: CartItem[];
-  stopId?: string;
-  isCurrentLocation?: boolean;
-  title?: string;
+  title: string;
+  stopId: string;
+  mode: 'current-location' | 'stop';
 }
 
 export const FoodSelectionModal: React.FC<FoodSelectionModalProps> = ({
   isOpen,
   onClose,
-  onConfirm,
-  allItems,
-  currentItems,
+  title,
   stopId,
-  isCurrentLocation = false,
-  title = 'Select Food'
+  mode,
 }) => {
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    new Set(currentItems.map(item => item.id))
-  );
+  const { cartItems, currentLocationFoodIds, updateStop, stops } = useFoodOrderSession();
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  const itemsToDisplay = useMemo(() => {
-    if (isCurrentLocation) {
-      return allItems;
+  useEffect(() => {
+    if (isOpen) {
+      if (mode === 'current-location') {
+        setSelectedIds(new Set(currentLocationFoodIds));
+      } else {
+        const stop = stops.find(s => s.id === stopId);
+        setSelectedIds(new Set(stop?.foodIds || []));
+      }
     }
-    return allItems;
-  }, [allItems, isCurrentLocation]);
+  }, [isOpen, mode, stopId, currentLocationFoodIds, stops]);
 
-  const isItemAssignedToOther = (item: CartItem): boolean => {
-    if (isCurrentLocation) return false;
-    return item.assignedTo !== 'CURRENT' && item.assignedTo !== stopId;
-  };
-
-  const isItemSelected = (itemId: string): boolean => {
-    return selectedIds.has(itemId);
-  };
-
-  const toggleItem = (item: CartItem) => {
-    if (isItemAssignedToOther(item)) return;
-
+  const toggleItem = (itemId: string) => {
     const newSelectedIds = new Set(selectedIds);
-
-    if (newSelectedIds.has(item.id)) {
-      const countAtCurrent = Array.from(newSelectedIds).filter(
-        id => {
-          const cartItem = allItems.find(i => i.id === id);
-          return cartItem && cartItem.assignedTo === 'CURRENT';
-        }
-      ).length;
-
-      if (isCurrentLocation && countAtCurrent === 1 && item.assignedTo === 'CURRENT') {
+    if (newSelectedIds.has(itemId)) {
+      if (mode === 'current-location' && selectedIds.size === 1) {
         return;
       }
-
-      newSelectedIds.delete(item.id);
+      newSelectedIds.delete(itemId);
     } else {
-      newSelectedIds.add(item.id);
+      newSelectedIds.add(itemId);
     }
-
     setSelectedIds(newSelectedIds);
   };
 
   const handleConfirm = () => {
-    onConfirm(Array.from(selectedIds));
+    if (mode === 'stop') {
+      updateStop(stopId, { foodIds: Array.from(selectedIds) });
+    }
     onClose();
   };
 
@@ -93,7 +71,6 @@ export const FoodSelectionModal: React.FC<FoodSelectionModalProps> = ({
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
           >
-            {/* Header */}
             <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-3xl">
               <h2 className="text-xl font-bold text-gray-900">{title}</h2>
               <motion.button
@@ -105,29 +82,23 @@ export const FoodSelectionModal: React.FC<FoodSelectionModalProps> = ({
               </motion.button>
             </div>
 
-            {/* Food Items */}
             <div className="px-6 py-4 space-y-3 pb-24">
-              {itemsToDisplay.map((item, index) => {
-                const isAssignedToOther = isItemAssignedToOther(item);
-                const isSelected = isItemSelected(item.id);
+              {cartItems.map((item, index) => {
+                const isSelected = selectedIds.has(item.id);
 
                 return (
                   <motion.button
                     key={item.id}
-                    onClick={() => !isAssignedToOther && toggleItem(item)}
+                    onClick={() => toggleItem(item.id)}
                     className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center space-x-4 ${
-                      isAssignedToOther
-                        ? 'border-gray-200 bg-gray-100 opacity-50 cursor-not-allowed'
-                        : isSelected
+                      isSelected
                         ? 'border-green-600 bg-green-50'
                         : 'border-gray-200 bg-white hover:border-gray-300'
                     }`}
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: index * 0.05 }}
-                    disabled={isAssignedToOther}
                   >
-                    {/* Image */}
                     <div className="w-16 h-16 rounded-lg bg-gray-200 overflow-hidden flex-shrink-0">
                       <img
                         src={item.image}
@@ -136,17 +107,12 @@ export const FoodSelectionModal: React.FC<FoodSelectionModalProps> = ({
                       />
                     </div>
 
-                    {/* Details */}
                     <div className="flex-1 text-left">
                       <h3 className="font-bold text-gray-900">{item.name}</h3>
                       <p className="text-sm text-gray-600">K{item.price}</p>
-                      {isAssignedToOther && (
-                        <p className="text-xs text-gray-500 mt-1">Assigned to another stop</p>
-                      )}
                     </div>
 
-                    {/* Checkbox/X */}
-                    {isSelected && !isAssignedToOther && (
+                    {isSelected && (
                       <motion.div
                         className="w-6 h-6 bg-green-600 rounded-full flex items-center justify-center flex-shrink-0"
                         initial={{ scale: 0 }}
@@ -161,7 +127,6 @@ export const FoodSelectionModal: React.FC<FoodSelectionModalProps> = ({
               })}
             </div>
 
-            {/* Confirm Button */}
             <motion.div
               className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-6"
               initial={{ y: 100 }}
